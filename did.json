@@ -13,7 +13,7 @@
 			"id": "did:web:therealfuntimeswithdanny.github.io#atproto",
 			"type": "Multikey",
 			"controller": "did:web:therealfuntimeswithdanny.github.io",
-			"publicKeyMultibase": "zQ3shpxhV7V29vYLYvyHSDkNFf4KZm7FEgs83spr4Z4hXMDBt"
+			"publicKeyMultibase": "zQ3shS9knqtCfgKA6XZKFGr9GPjiCjwZBU6ZwoTbq4HBB46oj"
 		}
 	],
 	"service": [
