@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDS Firehose: madebydanny.uk</title>
+    <style>
+        :root {
+            --bg-color: #f6f7f9;
+            --card-bg: #ffffff;
+            --text-main: #333;
+            --text-sub: #666;
+            --accent: #2563eb;
+            --key-color: #888;
+            --string-color: #059669;
+            --number-color: #d97706;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+            color: var(--text-main);
+        }
+
+        header {
+            max-width: 800px;
+            margin: 0 auto 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 { font-size: 1.2rem; margin: 0; display: flex; align-items: center; gap: 10px; }
+        .status { font-size: 0.8rem; padding: 4px 8px; border-radius: 4px; background: #ddd; }
+        .status.connected { background: #d1fae5; color: #065f46; }
+
+        #firehose-feed {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .event-card {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Mono", "Droid Sans Mono", "Source Code Pro", monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            line-height: 1.4;
+            border-left: 4px solid var(--accent);
+        }
+
+        /* JSON Syntax Highlighting */
+        .key { color: var(--text-sub); }
+        .string { color: var(--string-color); }
+        .number { color: var(--number-color); }
+        .boolean { color: var(--accent); }
+        .null { color: #dc2626; }
+        
+        .raw-record {
+            background: #fafafa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 5px;
+            border: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>
+        <span style="color:var(--accent)">⚛</span> 
+        Firehose: pds.madebydanny.uk
+    </h1>
+    <div id="connection-status" class="status">Connecting...</div>
+</header>
+
+<div id="firehose-feed">
+    </div>
+
+<script type="module">
+    import { decodeMultiple } from 'https://esm.sh/cbor-x?exports=decodeMultiple';
+    import { CarReader } from 'https://esm.sh/@ipld/car';
+    import { decode as decodeDagCbor } from 'https://esm.sh/@ipld/dag-cbor';
+
+    const PDS_HOST = "wss://pds.madebydanny.uk/xrpc/com.atproto.sync.subscribeRepos";
+    const feedContainer = document.getElementById('firehose-feed');
+    const statusEl = document.getElementById('connection-status');
+
+    let ws;
+
+    function connect() {
+        ws = new WebSocket(PDS_HOST);
+        ws.binaryType = "arraybuffer"; // Important: Receive raw binary data
+
+        ws.onopen = () => {
+            statusEl.textContent = "Connected";
+            statusEl.classList.add("connected");
+            addLog("System", { msg: "Listening for events..." });
+        };
+
+        ws.onclose = () => {
+            statusEl.textContent = "Disconnected";
+            statusEl.classList.remove("connected");
+            setTimeout(connect, 5000); // Auto-reconnect
+        };
+
+        ws.onmessage = async (event) => {
+            try {
+                const buffer = new Uint8Array(event.data);
+                
+                // AT Proto messages are two concatenated CBOR objects: [Header] [Body]
+                // We use decodeMultiple to parse them sequentially.
+                const decodedParts = [];
+                decodeMultiple(buffer, (part) => {
+                    decodedParts.push(part);
+                });
+
+                if (decodedParts.length < 2) return;
+
+                const header = decodedParts[0];
+                const body = decodedParts[1];
+
+                // We only care about commit operations (data changes)
+                if (header.t !== "#commit") return;
+
+                // Process the commit
+                await processCommit(body);
+
+            } catch (err) {
+                console.error("Error parsing message", err);
+            }
+        };
+    }
+
+    async function processCommit(commit) {
+        // If there are no blocks, we can't read the record details
+        if (!commit.blocks || commit.ops.length === 0) return;
+
+        // Load the CAR (Content Addressable Archive) blocks
+        // This is where the actual post/song data lives
+        let car;
+        try {
+            car = await CarReader.fromBytes(commit.blocks);
+        } catch (e) {
+            console.error("Failed to parse CAR", e);
+            return;
+        }
+
+        for (const op of commit.ops) {
+            // We only show creates or updates
+            if (op.action !== 'create' && op.action !== 'update') continue;
+            if (!op.cid) continue;
+
+            try {
+                // 1. Get the raw block using the Content ID (CID)
+                const block = await car.get(op.cid);
+                if (!block) continue;
+
+                // 2. Decode the block data (DAG-CBOR) into JSON
+                const record = decodeDagCbor(block.bytes);
+
+                // 3. Render to HTML
+                renderEvent(commit, op, record);
+            } catch (e) {
+                console.error("Error decoding record", e);
+            }
+        }
+    }
+
+    function renderEvent(commit, op, record) {
+        const div = document.createElement('div');
+        div.className = 'event-card';
+
+        // Construct the display object similar to the screenshot
+        const displayObj = {
+            $type: "com.atproto.sync.subscribeRepos#commit",
+            repo: commit.repo,
+            seq: commit.seq,
+            time: commit.time,
+            op: {
+                action: op.action,
+                path: op.path,
+                cid: op.cid.toString(),
+                record: record // This is the decoded content (Artist, etc)
+            }
+        };
+
+        div.innerHTML = syntaxHighlight(displayObj);
+        
+        // Add to top of list
+        feedContainer.insertBefore(div, feedContainer.firstChild);
+
+        // Limit history to 50 items to prevent browser lag
+        if (feedContainer.children.length > 50) {
+            feedContainer.removeChild(feedContainer.lastChild);
+        }
+    }
+
+    function addLog(title, data) {
+        const div = document.createElement('div');
+        div.className = 'event-card';
+        div.innerHTML = `<strong>${title}</strong><br>` + syntaxHighlight(data);
+        feedContainer.insertBefore(div, feedContainer.firstChild);
+    }
+
+    // Helper to colorize JSON for display
+    function syntaxHighlight(json) {
+        if (typeof json !== 'string') {
+            json = JSON.stringify(json, null, 2);
+        }
+        json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+            var cls = 'number';
+            if (/^"/.test(match)) {
+                if (/:$/.test(match)) {
+                    cls = 'key';
+                } else {
+                    cls = 'string';
+                }
+            } else if (/true|false/.test(match)) {
+                cls = 'boolean';
+            } else if (/null/.test(match)) {
+                cls = 'null';
+            }
+            return '<span class="' + cls + '">' + match + '</span>';
+        });
+    }
+
+    // Start
+    connect();
+</script>
+
+</body>
+</html>
