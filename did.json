@@ -6,21 +6,21 @@
 	],
 	"id": "did:web:therealfuntimeswithdanny.github.io",
 	"alsoKnownAs": [
-		"at://gitweb.mbdio.uk"
+		"at://danielweb.tophhie.social"
 	],
 	"verificationMethod": [
 		{
 			"id": "did:web:therealfuntimeswithdanny.github.io#atproto",
 			"type": "Multikey",
 			"controller": "did:web:therealfuntimeswithdanny.github.io",
-			"publicKeyMultibase": "zQ3shS9knqtCfgKA6XZKFGr9GPjiCjwZBU6ZwoTbq4HBB46oj"
+			"publicKeyMultibase": "zQ3shWVjaiwhJQ8VivSgVXrJgLfurQMyDgAionZVNTwbyJxLt"
 		}
 	],
 	"service": [
 		{
 			"id": "#atproto_pds",
 			"type": "AtprotoPersonalDataServer",
-			"serviceEndpoint": "https://pds.madebydanny.uk"
+			"serviceEndpoint": "https://pds.tophhie.cloud"
 		}
 	]
 }
